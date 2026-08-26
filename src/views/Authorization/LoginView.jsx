@@ -474,13 +474,12 @@ const LoginView = () => {
   const showIngressLoginButton =
     ingressAuthAvailable && Boolean(BASE_PATH) && !userProfile
   // Reached some other way (e.g. the addon's directly-exposed port) even
-  // though the server has ingress auth on -- point back at the ingress URL,
-  // which forces the visitor through the HA login flow.
+  // though the server has ingress auth on -- point back at Home Assistant,
+  // which forces the visitor through the HA login flow. No link: we can't
+  // reliably guess HA's URL (reverse proxies, custom ports, remote access),
+  // so this stays a text hint rather than a maybe-wrong clickable link.
   const showIngressLoginLink =
     ingressAuthAvailable && !BASE_PATH && !userProfile
-  const ingressPanelUrl = resource?.ha_ingress_slug
-    ? `${window.location.protocol}//${window.location.hostname}:8123/hassio/ingress/${resource.ha_ingress_slug}`
-    : null
 
   return (
     <AuthShell
@@ -758,13 +757,7 @@ const LoginView = () => {
           level='body-xs'
           sx={{ mt: 3, textAlign: 'center', color: 'text.secondary' }}
         >
-          {ingressPanelUrl ? (
-            <Link href={ingressPanelUrl} level='body-xs' underline='hover'>
-              {t('openViaHomeAssistant')}
-            </Link>
-          ) : (
-            t('openViaHomeAssistantHint')
-          )}
+          {t('openViaHomeAssistantHint')}
         </Typography>
       )}
 
