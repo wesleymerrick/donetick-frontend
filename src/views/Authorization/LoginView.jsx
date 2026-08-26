@@ -23,7 +23,6 @@ import { apiClient } from '../../utils/ApiClient'
 import { getPendingInvite } from '../../utils/PendingInvite'
 import { saveTokens } from '../../utils/TokenStorage'
 import { buildChildUsername, getUserDisplayInfo } from '../../utils/UserHelpers'
-import LoadingComponent from '../components/Loading.jsx'
 import {
   AuthDivider,
   AuthPasswordField,
@@ -34,6 +33,7 @@ import {
 } from './AuthFields'
 import AuthShell from './AuthShell'
 import { authButtonSx } from './authStyles'
+import HomeAssistantConsentModal from './HomeAssistantConsentModal'
 import MFAVerificationModal from './MFAVerificationModal'
 
 const SegmentedControl = ({ onChange, options, value }) => (
@@ -96,12 +96,8 @@ const LoginView = () => {
   const [mfaSessionToken, setMfaSessionToken] = useState('')
   const [isAppleSignInSupported, setIsAppleSignInSupported] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  // Only meaningful when served from a sub-path (e.g. HA ingress) -- that's
-  // the only setup where the backend's trusted-header auto-login could ever
-  // apply, so skip the extra round trip everywhere else.
-  const [checkingIngressAuth, setCheckingIngressAuth] = useState(
-    Boolean(BASE_PATH),
-  )
+  const [ingressConsentOpen, setIngressConsentOpen] = useState(false)
+  const [ingressLoading, setIngressLoading] = useState(false)
 
   // Child login state
   const [loginType, setLoginType] = useState('primary')
@@ -161,51 +157,46 @@ const LoginView = () => {
     }
   }, [isAuthenticated, user, Navigate])
 
-  useEffect(() => {
-    if (!BASE_PATH) return
-
-    let cancelled = false
-    ;(async () => {
-      try {
-        await apiClient.init()
-        const response = await fetch(`${apiClient.getApiURL()}/auth/ingress`, {
-          method: 'POST',
+  const handleIngressLogin = async () => {
+    setIngressLoading(true)
+    try {
+      await apiClient.init()
+      const response = await fetch(`${apiClient.getApiURL()}/auth/ingress`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        showError({
+          title: t('haLoginFailed'),
+          message: t('genericError'),
         })
-        if (cancelled) return
-        if (!response.ok) {
-          // Most common outcome: trust_ingress_auth is off, or this page
-          // was reached some other way (not through HA ingress). Neither
-          // is an error -- just fall through to the normal login form.
-          setCheckingIngressAuth(false)
-          return
-        }
-        const data = await response.json()
-        await saveTokens({
-          accessToken: data.token || data.access_token,
-          accessTokenExpiry: data.expire || data.access_token_expiry,
-          refreshToken: data.refresh_token,
-          refreshTokenExpiry: data.refresh_token_expiry,
-        })
-        if (cancelled) return
-        await queryClient.invalidateQueries(['userProfile'])
-        const redirectUrl = Cookies.get('ca_redirect')
-        if (redirectUrl) {
-          Cookies.remove('ca_redirect')
-          Navigate(redirectUrl)
-        } else {
-          Navigate('/chores')
-        }
-      } catch (e) {
-        console.error('Ingress auth check failed', e)
-        if (!cancelled) setCheckingIngressAuth(false)
+        return
       }
-    })()
-
-    return () => {
-      cancelled = true
+      const data = await response.json()
+      await saveTokens({
+        accessToken: data.token || data.access_token,
+        accessTokenExpiry: data.expire || data.access_token_expiry,
+        refreshToken: data.refresh_token,
+        refreshTokenExpiry: data.refresh_token_expiry,
+      })
+      await queryClient.invalidateQueries(['userProfile'])
+      const redirectUrl = Cookies.get('ca_redirect')
+      if (redirectUrl) {
+        Cookies.remove('ca_redirect')
+        Navigate(redirectUrl)
+      } else {
+        Navigate('/chores')
+      }
+    } catch (e) {
+      console.error('Ingress login failed', e)
+      showError({
+        title: t('haLoginFailed'),
+        message: t('genericError'),
+      })
+    } finally {
+      setIngressLoading(false)
+      setIngressConsentOpen(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }
 
   const handleSubmit = async e => {
     e.preventDefault()
@@ -473,14 +464,23 @@ const LoginView = () => {
     }
   }
 
-  if (checkingIngressAuth) {
-    return <LoadingComponent />
-  }
-
   const displayName = userProfile?.displayName || userProfile?.username
   const showSocialLogin = import.meta.env.VITE_IS_SELF_HOSTED !== 'true'
   const hasSocialOptions =
     showSocialLogin || Boolean(resource?.identity_provider?.client_id)
+  const ingressAuthAvailable = Boolean(resource?.trust_ingress_auth)
+  // Reached through HA ingress -- this is the deployment's native sign-in
+  // path, so it gets its own button rather than the "or continue with" row.
+  const showIngressLoginButton =
+    ingressAuthAvailable && Boolean(BASE_PATH) && !userProfile
+  // Reached some other way (e.g. the addon's directly-exposed port) even
+  // though the server has ingress auth on -- point back at the ingress URL,
+  // which forces the visitor through the HA login flow.
+  const showIngressLoginLink =
+    ingressAuthAvailable && !BASE_PATH && !userProfile
+  const ingressPanelUrl = resource?.ha_ingress_slug
+    ? `${window.location.protocol}//${window.location.hostname}:8123/hassio/ingress/${resource.ha_ingress_slug}`
+    : null
 
   return (
     <AuthShell
@@ -507,6 +507,21 @@ const LoginView = () => {
         ) : null
       }
     >
+      {showIngressLoginButton && (
+        <Box sx={{ mb: 2.5 }}>
+          <Button
+            fullWidth
+            size='lg'
+            sx={authButtonSx}
+            loading={ingressLoading}
+            onClick={() => setIngressConsentOpen(true)}
+          >
+            {t('continueWithHomeAssistant')}
+          </Button>
+          <AuthDivider>{t('or')}</AuthDivider>
+        </Box>
+      )}
+
       {userProfile ? (
         <Box
           sx={{
@@ -737,6 +752,28 @@ const LoginView = () => {
           </Link>
         </Typography>
       )}
+
+      {showIngressLoginLink && (
+        <Typography
+          level='body-xs'
+          sx={{ mt: 3, textAlign: 'center', color: 'text.secondary' }}
+        >
+          {ingressPanelUrl ? (
+            <Link href={ingressPanelUrl} level='body-xs' underline='hover'>
+              {t('openViaHomeAssistant')}
+            </Link>
+          ) : (
+            t('openViaHomeAssistantHint')
+          )}
+        </Typography>
+      )}
+
+      <HomeAssistantConsentModal
+        open={ingressConsentOpen}
+        loading={ingressLoading}
+        onClose={() => setIngressConsentOpen(false)}
+        onConfirm={handleIngressLogin}
+      />
 
       <MFAVerificationModal
         open={mfaModalOpen}
