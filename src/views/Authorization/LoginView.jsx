@@ -23,6 +23,7 @@ import { apiClient } from '../../utils/ApiClient'
 import { getPendingInvite } from '../../utils/PendingInvite'
 import { saveTokens } from '../../utils/TokenStorage'
 import { buildChildUsername, getUserDisplayInfo } from '../../utils/UserHelpers'
+import LoadingComponent from '../components/Loading.jsx'
 import {
   AuthDivider,
   AuthPasswordField,
@@ -95,6 +96,12 @@ const LoginView = () => {
   const [mfaSessionToken, setMfaSessionToken] = useState('')
   const [isAppleSignInSupported, setIsAppleSignInSupported] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Only meaningful when served from a sub-path (e.g. HA ingress) -- that's
+  // the only setup where the backend's trusted-header auto-login could ever
+  // apply, so skip the extra round trip everywhere else.
+  const [checkingIngressAuth, setCheckingIngressAuth] = useState(
+    Boolean(BASE_PATH),
+  )
 
   // Child login state
   const [loginType, setLoginType] = useState('primary')
@@ -153,6 +160,53 @@ const LoginView = () => {
       }
     }
   }, [isAuthenticated, user, Navigate])
+
+  useEffect(() => {
+    if (!BASE_PATH) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        await apiClient.init()
+        const response = await fetch(`${apiClient.getApiURL()}/auth/ingress`, {
+          method: 'POST',
+        })
+        if (cancelled) return
+        if (!response.ok) {
+          // Most common outcome: trust_ingress_auth is off, or this page
+          // was reached some other way (not through HA ingress). Neither
+          // is an error -- just fall through to the normal login form.
+          setCheckingIngressAuth(false)
+          return
+        }
+        const data = await response.json()
+        await saveTokens({
+          accessToken: data.token || data.access_token,
+          accessTokenExpiry: data.expire || data.access_token_expiry,
+          refreshToken: data.refresh_token,
+          refreshTokenExpiry: data.refresh_token_expiry,
+        })
+        if (cancelled) return
+        await queryClient.invalidateQueries(['userProfile'])
+        const redirectUrl = Cookies.get('ca_redirect')
+        if (redirectUrl) {
+          Cookies.remove('ca_redirect')
+          Navigate(redirectUrl)
+        } else {
+          Navigate('/chores')
+        }
+      } catch (e) {
+        console.error('Ingress auth check failed', e)
+        if (!cancelled) setCheckingIngressAuth(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleSubmit = async e => {
     e.preventDefault()
 
@@ -417,6 +471,10 @@ const LoginView = () => {
       console.log('redirect', `${authentikAuthorizeUrl}?${params.toString()}`)
       window.location.href = `${authentikAuthorizeUrl}?${params.toString()}`
     }
+  }
+
+  if (checkingIngressAuth) {
+    return <LoadingComponent />
   }
 
   const displayName = userProfile?.displayName || userProfile?.username
