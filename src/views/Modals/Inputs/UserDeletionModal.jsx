@@ -21,10 +21,21 @@ import { CheckUserDeletion, DeleteUser } from '../../../utils/Fetcher'
 // the label around it is what gets translated.
 const CONFIRMATION_WORD = 'DELETE'
 
-function UserDeletionModal({ isOpen, onClose }) {
+// Mirrors the backend's AuthProviderType enum (internal/user/model/model.go).
+// Only AuthProviderDonetick (0) accounts have a password the user knows.
+const PROVIDER_NAMES = {
+  1: 'SSO',
+  2: 'Google',
+  3: 'Apple',
+  4: 'Home Assistant',
+}
+
+function UserDeletionModal({ isOpen, onClose, userProfile }) {
   const { t } = useTranslation('settings')
   const { ResponsiveModal } = useResponsiveModal()
   const Navigate = useNavigate()
+  const providerName = PROVIDER_NAMES[userProfile?.provider]
+  const requiresPassword = !providerName
   const [step, setStep] = useState(1) // 1: Warning, 2: Transfer, 3: Confirm
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
@@ -53,7 +64,7 @@ function UserDeletionModal({ isOpen, onClose }) {
   )
 
   const checkDeletionRequirements = async () => {
-    if (password.trim() === '') {
+    if (requiresPassword && password.trim() === '') {
       setError(t('deletion.passwordRequired'))
       return
     }
@@ -103,7 +114,10 @@ function UserDeletionModal({ isOpen, onClose }) {
   }
 
   const executeUserDeletion = async () => {
-    if (password.trim() === '' || confirmation !== CONFIRMATION_WORD) {
+    if (
+      (requiresPassword && password.trim() === '') ||
+      confirmation !== CONFIRMATION_WORD
+    ) {
       setError(t('deletion.passwordAndDelete'))
       return
     }
@@ -176,15 +190,21 @@ function UserDeletionModal({ isOpen, onClose }) {
         ))}
       </Box>
 
-      <FormControl sx={{ mb: 2 }}>
-        <FormLabel>{t('deletion.passwordToContinue')}</FormLabel>
-        <Input
-          type='password'
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder={t('deletion.passwordPlaceholder')}
-        />
-      </FormControl>
+      {requiresPassword ? (
+        <FormControl sx={{ mb: 2 }}>
+          <FormLabel>{t('deletion.passwordToContinue')}</FormLabel>
+          <Input
+            type='password'
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder={t('deletion.passwordPlaceholder')}
+          />
+        </FormControl>
+      ) : (
+        <Typography level='body-sm' color='neutral' mb={2}>
+          {t('deletion.noPasswordNeeded', { provider: providerName })}
+        </Typography>
+      )}
 
       {error && (
         <Typography level='body-sm' color='danger' mb={2}>
@@ -243,15 +263,17 @@ function UserDeletionModal({ isOpen, onClose }) {
         {t('deletion.logoutNotice')}
       </Typography>
 
-      <FormControl sx={{ mb: 2 }}>
-        <FormLabel>{t('deletion.passwordLabel')}</FormLabel>
-        <Input
-          type='password'
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder={t('deletion.passwordPlaceholder')}
-        />
-      </FormControl>
+      {requiresPassword && (
+        <FormControl sx={{ mb: 2 }}>
+          <FormLabel>{t('deletion.passwordLabel')}</FormLabel>
+          <Input
+            type='password'
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder={t('deletion.passwordPlaceholder')}
+          />
+        </FormControl>
+      )}
 
       <FormControl sx={{ mb: 3 }}>
         <FormLabel>
@@ -318,10 +340,11 @@ function UserDeletionModal({ isOpen, onClose }) {
                     : executeUserDeletion,
               disabled:
                 step === 1
-                  ? !password
+                  ? requiresPassword && !password
                   : step === 2
                     ? circlesRequiringTransfer.length !== transferOptions.length
-                    : !password || confirmation !== CONFIRMATION_WORD,
+                    : (requiresPassword && !password) ||
+                      confirmation !== CONFIRMATION_WORD,
             }}
           />
         )

@@ -27,6 +27,10 @@ const AccountSettings = () => {
   const [subscriptionModal, setSubscriptionModal] = useState(false)
   const [userDeletionModal, setUserDeletionModal] = useState(false)
   const [nativeCancelModal, setNativeCancelModal] = useState(false)
+  // AuthProviderDonetick (0) is the only provider with a password the user
+  // actually knows -- OAuth2/Google/Apple/Home Assistant accounts either have
+  // none or a randomly generated one they never saw.
+  const isPasswordProvider = (userProfile?.provider ?? 0) === 0
 
   useEffect(() => {
     async function configurePurchases() {
@@ -204,45 +208,46 @@ const AccountSettings = () => {
             </Button>
           )}
         </Box>
-        {import.meta.env.VITE_IS_SELF_HOSTED === 'true' && (
-          <Box>
-            <Typography level='title-md' mb={1}>
-              {t('accountSettings.password')}
-            </Typography>
-            <Typography mb={1} level='body-sm'></Typography>
-            <Button
-              variant='soft'
-              onClick={() => {
-                setChangePasswordModal(true)
-              }}
-            >
-              {t('accountSettings.changePassword')}
-            </Button>
-            {changePasswordModal ? (
-              <PassowrdChangeModal
-                isOpen={changePasswordModal}
-                onClose={password => {
-                  if (password) {
-                    UpdatePassword(password).then(resp => {
-                      if (resp.ok) {
-                        showNotification({
-                          type: 'success',
-                          message: t('accountSettings.passwordChanged'),
-                        })
-                      } else {
-                        showNotification({
-                          type: 'error',
-                          message: t('accountSettings.passwordChangeFailed'),
-                        })
-                      }
-                    })
-                  }
-                  setChangePasswordModal(false)
+        {import.meta.env.VITE_IS_SELF_HOSTED === 'true' &&
+          isPasswordProvider && (
+            <Box>
+              <Typography level='title-md' mb={1}>
+                {t('accountSettings.password')}
+              </Typography>
+              <Typography mb={1} level='body-sm'></Typography>
+              <Button
+                variant='soft'
+                onClick={() => {
+                  setChangePasswordModal(true)
                 }}
-              />
-            ) : null}
-          </Box>
-        )}
+              >
+                {t('accountSettings.changePassword')}
+              </Button>
+              {changePasswordModal ? (
+                <PassowrdChangeModal
+                  isOpen={changePasswordModal}
+                  onClose={password => {
+                    if (password) {
+                      UpdatePassword(password).then(resp => {
+                        if (resp.ok) {
+                          showNotification({
+                            type: 'success',
+                            message: t('accountSettings.passwordChanged'),
+                          })
+                        } else {
+                          showNotification({
+                            type: 'error',
+                            message: t('accountSettings.passwordChangeFailed'),
+                          })
+                        }
+                      })
+                    }
+                    setChangePasswordModal(false)
+                  }}
+                />
+              ) : null}
+            </Box>
+          )}
 
         <Box>
           <Typography level='title-md' mb={1} color='danger'>

@@ -611,6 +611,7 @@
     "removesPoints": "Points history and notifications",
     "removesCircles": "Circle memberships and relationships",
     "passwordToContinue": "Enter your password to continue",
+    "noPasswordNeeded": "Your account is linked through {{provider}} and has no password to enter. Deleting it here will not affect your {{provider}} account.",
     "circleLabel": "Circle: {{name}}",
     "newOwner": "New Owner",
     "logoutNotice": "On successful deletion, you will be logged out and redirected to the login page.",
